@@ -900,7 +900,13 @@ module Net; module SFTP
         channel.on_close(&method(:when_channel_closed))
         channel.on_process(&method(:when_channel_polled))
 
-        send_packet(FXP_INIT, :long, @version || HIGHEST_PROTOCOL_VERSION_SUPPORTED)
+        send_packet(FXP_INIT, :long, offered_version)
+      end
+
+      # The protocol version advertised to the server in FXP_INIT: the caller's
+      # pin if one was given, otherwise the highest this library implements.
+      def offered_version
+        @version || HIGHEST_PROTOCOL_VERSION_SUPPORTED
       end
 
       # Called when the SSH server closes the underlying channel.
@@ -964,7 +970,12 @@ module Net; module SFTP
         server_version = packet.read_long
         debug { "server reports sftp version #{server_version}" }
 
-        negotiated_version = [server_version, HIGHEST_PROTOCOL_VERSION_SUPPORTED].min
+        # Cap against the version actually offered in FXP_INIT, not merely the
+        # highest this library can speak. OpenSSH always answers 3 regardless
+        # of what the client offered, so capping against the constant meant
+        # Net::SFTP.start(..., version: 1) silently got the v3 driver -- the
+        # :version option did not pin anything.
+        negotiated_version = [server_version, offered_version].min
         info { "negotiated version is #{negotiated_version}" }
 
         if @min_version && negotiated_version < @min_version

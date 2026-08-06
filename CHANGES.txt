@@ -20,6 +20,11 @@ Security fixes:
 
 New:
 
+* The :version option now actually pins the protocol version. Negotiation was
+  capped against the highest version the library implements rather than the
+  version offered in FXP_INIT, and OpenSSH answers with its own version
+  regardless of what the client offered -- so Net::SFTP.start(..., version: 1)
+  against OpenSSH silently used the v3 driver.
 * Net::SFTP.start accepts :min_version, to refuse a server that negotiates a
   protocol version below the one your application requires.
 * Net::SFTP::Session#extensions exposes the extensions advertised by the server

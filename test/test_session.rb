@@ -22,6 +22,15 @@ class SessionTest < Net::SFTP::TestCase
     assert_equal version, sftp.protocol.version
   end
 
+  # Real servers (OpenSSH among them) answer FXP_INIT with their own version
+  # regardless of what the client offered. Capping against the constant rather
+  # than the offered version meant :version pinned nothing.
+  def test_passing_version_should_pin_even_when_server_reports_higher
+    expect_sftp_session :client_version => 3, :server_version => 6
+    assert_scripted { sftp({}, 3).connect! }
+    assert_equal 3, sftp.protocol.version
+  end
+
   # The server alone decides the negotiated version, so a caller that needs
   # v3+ semantics (rename, readlink, symlink) must be able to say so.
   def test_min_version_should_reject_a_server_that_negotiates_lower
