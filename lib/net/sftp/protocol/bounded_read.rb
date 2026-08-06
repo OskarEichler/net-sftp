@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'net/sftp/errors'
 
 module Net; module SFTP; module Protocol

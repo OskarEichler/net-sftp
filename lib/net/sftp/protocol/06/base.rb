@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'net/sftp/protocol/05/base'
 require 'net/sftp/protocol/06/attributes'
 

@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module Net module SFTP
 
   # The packet types and other general constants used by the SFTP protocol.

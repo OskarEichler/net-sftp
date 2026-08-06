@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module Net; module SFTP
 
   # The base exception class for the SFTP system.

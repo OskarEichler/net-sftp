@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'net/sftp/protocol/02/base'
 
 module Net; module SFTP; module Protocol; module V03

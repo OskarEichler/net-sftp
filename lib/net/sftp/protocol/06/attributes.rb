@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'net/sftp/protocol/04/attributes'
 
 module Net; module SFTP; module Protocol; module V06

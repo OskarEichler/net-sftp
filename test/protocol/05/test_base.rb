@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'common'
 require 'protocol/04/test_base'
 

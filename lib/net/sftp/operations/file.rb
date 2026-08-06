@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'net/ssh/loggable'
 
 module Net; module SFTP; module Operations
@@ -30,14 +32,14 @@ module Net; module SFTP; module Operations
       @pos      = 0
       @real_pos = 0
       @real_eof = false
-      @buffer   = ""
+      @buffer   = +""
     end
 
     # Repositions the file pointer to the given offset (relative to the
     # start of the file). This will also reset the EOF flag.
     def pos=(offset)
       @real_pos = @pos = offset
-      @buffer = ""
+      @buffer = +""
       @real_eof = false
     end
 
@@ -69,9 +71,9 @@ module Net; module SFTP; module Operations
       end
 
       if n
-        result, @buffer = @buffer[0,n], (@buffer[n..-1] || "")
+        result, @buffer = @buffer[0,n], (@buffer[n..-1] || +"")
       else
-        result, @buffer = @buffer, ""
+        result, @buffer = @buffer, +""
       end
 
       @pos += result.length
@@ -113,7 +115,7 @@ module Net; module SFTP; module Operations
         elsif !fill
           return nil if @buffer.empty?
           @pos += @buffer.length
-          line, @buffer = @buffer, ""
+          line, @buffer = @buffer, +""
           return line
         end
       end
@@ -132,9 +134,11 @@ module Net; module SFTP; module Operations
     def write(data)
       data = data.to_s
       sftp.write!(handle, @real_pos, data)
-      @real_pos += data.bytes.length
+      # bytesize is O(1); String#bytes materialises the whole byte array, which
+      # this used to do twice per write.
+      @real_pos += data.bytesize
       @pos = @real_pos
-      data.bytes.length
+      data.bytesize
     end
 
     # Writes each argument to the stream. If +$\+ is set, it will be written

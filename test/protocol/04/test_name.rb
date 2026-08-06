@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'common'
 
 class Protocol::V04::TestName < Net::SFTP::TestCase

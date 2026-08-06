@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'common'
 
 # NOTE: these tests assume that the interface to Net::SFTP::Session#send_packet

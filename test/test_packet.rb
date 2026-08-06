@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'common'
 
 class PacketTest < Net::SFTP::TestCase

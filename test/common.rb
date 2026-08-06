@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'minitest/autorun'
 require 'mocha/minitest'
 require 'stringio'
@@ -34,6 +36,17 @@ class Net::SFTP::TestCase < Minitest::Test
 
     def raw(*args)
       Net::SSH::Buffer.from(*args).to_s
+    end
+
+    # Ruby 4.0 deprecates assigning a non-nil value to $/ and $\. Operations::File
+    # still honours them, mirroring ::IO, so the tests that exercise that
+    # behaviour must set them deliberately without drowning the run in warnings.
+    def without_deprecation_warnings
+      was = Warning[:deprecated]
+      Warning[:deprecated] = false
+      yield
+    ensure
+      Warning[:deprecated] = was
     end
 
     def sftp(options={}, version=nil, min_version: nil)

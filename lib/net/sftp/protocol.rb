@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'net/sftp/protocol/01/base'
 require 'net/sftp/protocol/02/base'
 require 'net/sftp/protocol/03/base'
