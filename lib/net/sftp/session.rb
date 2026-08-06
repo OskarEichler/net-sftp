@@ -49,6 +49,11 @@ module Net; module SFTP
     # The highest protocol version supported by the Net::SFTP library.
     HIGHEST_PROTOCOL_VERSION_SUPPORTED = 6
 
+    # The largest SFTP packet the client will accept from a server. This
+    # matches the limit OpenSSH's sftp-server enforces, and bounds the memory
+    # a single server-supplied length field can commit the client to.
+    MAX_PACKET_LENGTH = 256 * 1024
+
     # A reference to the Net::SSH session object that powers this SFTP session.
     attr_reader :session
 
@@ -898,6 +903,14 @@ module Net; module SFTP
             # make sure we've read enough data to tell how long the packet is
             return unless input.length >= 4
             @packet_length = input.read_long
+
+            # The length is a server-supplied 32-bit value, so without a cap a
+            # single packet header can make the client buffer up to 4GiB (or
+            # wait forever for bytes that never arrive).
+            if @packet_length > MAX_PACKET_LENGTH
+              raise Net::SFTP::Exception,
+                    "server sent an oversized packet (#{@packet_length} bytes, maximum is #{MAX_PACKET_LENGTH})"
+            end
           end
 
           return unless input.length >= @packet_length + 4

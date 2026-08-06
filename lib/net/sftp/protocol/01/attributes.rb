@@ -1,4 +1,5 @@
 require 'net/ssh/buffer'
+require 'net/sftp/protocol/bounded_read'
 
 module Net; module SFTP; module Protocol; module V01
 
@@ -38,6 +39,11 @@ module Net; module SFTP; module Protocol; module V01
     T_CHAR_DEVICE  = 7
     T_BLOCK_DEVICE = 8
     T_FIFO         = 9
+
+    # Parsing happens on the singleton, so the bound helpers are extended
+    # rather than included. Subclasses (V04, V06) inherit this through their
+    # own singleton classes.
+    extend Net::SFTP::Protocol::BoundedRead
 
     class <<self
       # Returns the array of attribute meta-data that defines the structure of
@@ -106,7 +112,8 @@ module Net; module SFTP; module Protocol; module V01
         # Parse the hash of extended data from the buffer.
         def parse_extended(buffer)
           extended = Hash.new
-          buffer.read_long.times do
+          # Each pair is two strings, so 8 bytes of length prefixes at minimum.
+          read_bounded_count!(buffer, 8, "extended attribute").times do
             extended[buffer.read_string] = buffer.read_string
           end
           extended
