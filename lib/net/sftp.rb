@@ -51,11 +51,21 @@ module Net
       end
 
       sftp
-    rescue Object => anything
-      begin
-        session.shutdown!
-      rescue ::Exception
-        # swallow exceptions that occur while trying to shutdown
+    rescue ::Exception => anything
+      # Deliberately broad: an Interrupt or a Timeout::Error part-way through
+      # setup must still tear down the SSH session before propagating. Nothing
+      # is swallowed -- the original exception is always re-raised.
+      #
+      # session is nil if Net::SSH.start itself raised, in which case there is
+      # nothing to shut down.
+      if session
+        begin
+          session.shutdown!
+        rescue ::StandardError => shutdown_error
+          # A failure to shut down must not mask the exception that got us
+          # here, but it should not vanish silently either.
+          warn "net-sftp: error while shutting down session after #{anything.class}: #{shutdown_error.message}"
+        end
       end
 
       raise anything

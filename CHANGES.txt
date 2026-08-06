@@ -1,3 +1,53 @@
+=== Unreleased
+
+Security fixes:
+
+* Reject unsafe filenames supplied by the server during a recursive download.
+  Only "." and ".." were previously filtered, so a malicious or compromised
+  server could return a name such as "../../.ssh/authorized_keys" and cause an
+  arbitrary local file write. Entry names must now be a single path component.
+* Refuse to create a download directory through a pre-existing local symlink,
+  and open local destination files with O_NOFOLLOW where available.
+* Bound the server-supplied item counts in parse_acl, parse_extended and
+  parse_name_packet against the bytes actually remaining. Previously a 12-byte
+  packet could drive billions of allocations (remote denial of service).
+* Cap accepted packet length at 256KiB, matching OpenSSH's sftp-server.
+* Reject a second FXP_VERSION packet, which could otherwise swap the protocol
+  driver mid-session and orphan every pending request.
+* Ignore, rather than raise on, responses carrying an unknown request id, so an
+  unsolicited packet cannot tear down the caller's event loop.
+* Close local file handles when a transfer callback raises.
+
+New:
+
+* Net::SFTP.start accepts :min_version, to refuse a server that negotiates a
+  protocol version below the one your application requires.
+* Net::SFTP::Session#extensions exposes the extensions advertised by the server
+  in its FXP_VERSION response. These were previously parsed and discarded.
+
+Compatibility:
+
+* Ruby 3.1 or later is now required, and this is declared in the gemspec
+  (previously there was no required_ruby_version at all).
+* The gem is safe under frozen string literals, and every file carries the
+  magic comment. Fixes FrozenError in V04::Name#longname and in the whole
+  Operations::File read path.
+* CI runs on Ruby 3.1 through 4.0 rather than 2.5 through 3.1, on a runner
+  image that still exists. Previously no CI job had been scheduled since 2022.
+* The Rakefile no longer fails to load when rdoc is absent (rdoc stopped being
+  a default gem in Ruby 4.0).
+
+Removed:
+
+* setup.rb, a vendored 2004-era installer that had been broken since Ruby 2.2,
+  was referenced by nothing, and shipped LGPL code inside an MIT gem.
+* The stale Manifest file.
+
+Known issue:
+
+* The gem signing certificate expired on 2023-09-22, so `rake release` cannot
+  produce a signed build until it is regenerated. See net-ssh/net-sftp#152.
+
 === 3.0.0
 
 * Pass protocol version via Net::SFTP.start [#107]

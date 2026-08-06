@@ -809,8 +809,6 @@ module Net; module SFTP
         self
       end
 
-      alias :loop_forever :loop
-
       # Runs the SSH event loop while the given block returns true. This lets
       # you set up a state machine and then "fire it off". If you do not specify
       # a block, the event loop will run for as long as there are any pending
@@ -822,6 +820,11 @@ module Net; module SFTP
         block ||= Proc.new { pending_requests.any? }
         session.loop(&block)
       end
+
+      # This alias used to sit above #loop, where it aliased Kernel#loop
+      # instead, and inherited its private visibility -- so calling
+      # sftp.loop_forever raised NoMethodError.
+      alias :loop_forever :loop
 
       # Formats, constructs, and sends an SFTP packet of the given type and with
       # the given data. This does not block, but merely enqueues the packet for
