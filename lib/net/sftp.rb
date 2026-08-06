@@ -30,14 +30,17 @@ module Net
     #
     # Extra parameters can be passed:
     # - The Net::SSH connection options (see Net::SSH for more information)
-    # - The Net::SFTP connection options (only :version is supported, to let you 
-    #   set the SFTP protocol version to be used)
+    # - The Net::SFTP connection options:
+    #   - :version     - the SFTP protocol version to offer to the server
+    #   - :min_version - refuse the session if the server negotiates a
+    #     protocol version below this. The server alone chooses the negotiated
+    #     version, so without this it can silently downgrade the client to
+    #     protocol 1.
     def self.start(host, user, ssh_options={}, sftp_options={}, &block)
       session = Net::SSH.start(host, user, ssh_options)
-      # We only use a single option here, but this leaves room for more later
-      # without breaking the external API.
       version = sftp_options.fetch(:version, nil)
-      sftp = Net::SFTP::Session.new(session, version, &block).connect!
+      min_version = sftp_options.fetch(:min_version, nil)
+      sftp = Net::SFTP::Session.new(session, version, min_version: min_version, &block).connect!
 
       if block_given?
         sftp.loop

@@ -36,16 +36,23 @@ class Net::SFTP::TestCase < Minitest::Test
       Net::SSH::Buffer.from(*args).to_s
     end
 
-    def sftp(options={}, version=nil)
-      @sftp ||= Net::SFTP::Session.new(connection(options), version)
+    def sftp(options={}, version=nil, min_version: nil)
+      @sftp ||= Net::SFTP::Session.new(connection(options), version, min_version: min_version)
     end
 
+    # +opts[:extensions]+ is a flat list of alternating name/value strings to
+    # append to the FXP_VERSION packet, as a real server advertising protocol
+    # extensions would.
     def expect_sftp_session(opts={})
       story do |session|
         channel = session.opens_channel
         channel.sends_subsystem("sftp")
         channel.sends_packet(FXP_INIT, :long, opts[:client_version] || Net::SFTP::Session::HIGHEST_PROTOCOL_VERSION_SUPPORTED)
-        channel.gets_packet(FXP_VERSION, :long, opts[:server_version] || Net::SFTP::Session::HIGHEST_PROTOCOL_VERSION_SUPPORTED)
+
+        version_args = [:long, opts[:server_version] || Net::SFTP::Session::HIGHEST_PROTOCOL_VERSION_SUPPORTED]
+        Array(opts[:extensions]).each { |value| version_args.push(:string, value) }
+        channel.gets_packet(FXP_VERSION, *version_args)
+
         yield channel if block_given?
       end
     end

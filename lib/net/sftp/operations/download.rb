@@ -161,6 +161,10 @@ module Net; module SFTP; module Operations
       @options = options
       @active = 0
       @properties = options[:properties] || {}
+      # Local files this downloader opened itself, so they can be closed if the
+      # transfer is aborted or a callback raises. IO objects supplied by the
+      # caller are not tracked -- closing those is the caller's business.
+      @open_sinks = []
 
       self.logger = sftp.logger
 
@@ -188,6 +192,7 @@ module Net; module SFTP; module Operations
     def abort!
       @active = 0
       @stack.clear
+      close_open_sinks!
     end
 
     # Runs the SSH event loop for as long as the downloader is active (see
@@ -238,6 +243,38 @@ module Net; module SFTP; module Operations
       # Defaults to 16 for recursive downloads.
       def requests
         options[:requests] || (recursive? ? 16 : 2)
+      end
+
+      # Wraps one of the on_* response handlers so that a raised exception
+      # cannot leave the transfer half-open.
+      #
+      # These handlers run inside a Net::SSH channel callback, and every one of
+      # them can raise StatusException. Without this, the exception unwinds
+      # through the event loop leaving local file handles open, partial files
+      # on disk, and @active never decremented.
+      def callback(name)
+        handler = method(name)
+
+        proc do |response|
+          begin
+            handler.call(response)
+          rescue ::Exception
+            abort!
+            raise
+          end
+        end
+      end
+
+      # Closes every local file this downloader opened. Idempotent, and never
+      # masks the exception that prompted the cleanup.
+      def close_open_sinks!
+        while sink = @open_sinks.pop
+          begin
+            sink.close unless sink.closed?
+          rescue StandardError => e
+            warn { "failed to close local file during cleanup: #{e.message}" }
+          end
+        end
       end
 
       # Ensures that a filename reported by the server during a recursive
@@ -292,7 +329,7 @@ module Net; module SFTP; module Operations
           if entry.directory
             update_progress(:mkdir, entry.local)
             make_directory(entry.local)
-            request = sftp.opendir(entry.remote, &method(:on_opendir))
+            request = sftp.opendir(entry.remote, &callback(:on_opendir))
             request[:entry] = entry
           else
             open_file(entry)
@@ -309,7 +346,7 @@ module Net; module SFTP; module Operations
         entry = response.request[:entry]
         raise  StatusException.new(response, "opendir #{entry.remote}") unless response.ok?
         entry.handle = response[:handle]
-        request = sftp.readdir(response[:handle], &method(:on_readdir))
+        request = sftp.readdir(response[:handle], &callback(:on_readdir))
         request[:parent] = entry
       end
 
@@ -319,7 +356,7 @@ module Net; module SFTP; module Operations
       def on_readdir(response)
         entry = response.request[:parent]
         if response.eof?
-          request = sftp.close(entry.handle, &method(:on_closedir))
+          request = sftp.close(entry.handle, &callback(:on_closedir))
           request[:parent] = entry
         elsif !response.ok?
           raise StatusException.new(response, "readdir #{entry.remote}")
@@ -333,7 +370,7 @@ module Net; module SFTP; module Operations
           # take this opportunity to enqueue more requests
           process_next_entry
 
-          request = sftp.readdir(entry.handle, &method(:on_readdir))
+          request = sftp.readdir(entry.handle, &callback(:on_readdir))
           request[:parent] = entry
         end
       end
@@ -341,7 +378,7 @@ module Net; module SFTP; module Operations
       # Called when a file is to be opened for reading from the remote server.
       def open_file(entry)
         update_progress(:open, entry)
-        request = sftp.open(entry.remote, &method(:on_open))
+        request = sftp.open(entry.remote, &callback(:on_open))
         request[:entry] = entry
       end
 
@@ -357,10 +394,30 @@ module Net; module SFTP; module Operations
       # to initiate the data transfer.
       def on_open(response)
         entry = response.request[:entry]
-        raise StatusException.new(response, "open #{entry.remote}") unless response.ok?
+
+        unless response.ok?
+          # Protocol versions 1-3 make the permissions bits optional, so
+          # Name#directory? returns nil rather than true/false when the server
+          # omits them. Such an entry is attempted as a file, and if it was in
+          # fact a directory the open fails. Skipping it keeps the rest of the
+          # tree downloading instead of aborting the whole transfer over one
+          # ambiguous listing entry.
+          if entry.directory.nil?
+            warn { "skipping #{entry.remote}: type not reported by server and it could not be opened as a file" }
+            @active -= 1
+            return process_next_entry
+          end
+
+          raise StatusException.new(response, "open #{entry.remote}")
+        end
 
         entry.handle = response[:handle]
-        entry.sink = entry.local.respond_to?(:write) ? entry.local : open_sink(entry.local)
+        if entry.local.respond_to?(:write)
+          entry.sink = entry.local
+        else
+          entry.sink = open_sink(entry.local)
+          @open_sinks << entry.sink
+        end
         entry.offset = 0
 
         download_next_chunk(entry)
@@ -368,7 +425,7 @@ module Net; module SFTP; module Operations
 
       # Initiates a read of the next #read_size bytes from the file.
       def download_next_chunk(entry)
-        request = sftp.read(entry.handle, entry.offset, read_size, &method(:on_read))
+        request = sftp.read(entry.handle, entry.offset, read_size, &callback(:on_read))
         request[:entry] = entry
         request[:offset] = entry.offset
       end
@@ -382,7 +439,8 @@ module Net; module SFTP; module Operations
         if response.eof?
           update_progress(:close, entry)
           entry.sink.close
-          request = sftp.close(entry.handle, &method(:on_close))
+          @open_sinks.delete(entry.sink)
+          request = sftp.close(entry.handle, &callback(:on_close))
           request[:entry] = entry
         elsif !response.ok?
           raise StatusException.new(response, "read #{entry.remote}")

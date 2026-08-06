@@ -20,6 +20,59 @@ class SessionTest < Net::SFTP::TestCase
     assert_equal version, sftp.protocol.version
   end
 
+  # The server alone decides the negotiated version, so a caller that needs
+  # v3+ semantics (rename, readlink, symlink) must be able to say so.
+  def test_min_version_should_reject_a_server_that_negotiates_lower
+    expect_sftp_session :server_version => 1
+
+    Net::SSH::Test::Extensions::IO.with_test_extension do
+      error = assert_raises(Net::SFTP::Exception) { sftp({}, nil, min_version: 3).connect! }
+      assert_match(/negotiated sftp version 1/, error.message)
+      assert_match(/3 was required/, error.message)
+    end
+  end
+
+  def test_min_version_should_accept_a_server_that_meets_it
+    expect_sftp_session :server_version => 6
+    assert_scripted { sftp({}, nil, min_version: 3).connect! }
+    assert_equal 6, sftp.protocol.version
+  end
+
+  # A second FXP_VERSION would swap the protocol driver mid-flight, discard
+  # every pending request, and then fail on the already-cleared @on_ready list.
+  def test_second_version_packet_should_be_rejected
+    expect_sftp_session :server_version => 3 do |channel|
+      channel.gets_packet(FXP_VERSION, :long, 3)
+    end
+
+    Net::SSH::Test::Extensions::IO.with_test_extension do
+      error = assert_raises(Net::SFTP::Exception) { sftp.connect! }
+      assert_match(/unexpected FXP_VERSION/, error.message)
+    end
+  end
+
+  # An unsolicited or duplicated response must not tear down the event loop.
+  def test_response_for_unknown_request_id_should_be_ignored
+    expect_sftp_session :server_version => 3 do |channel|
+      channel.gets_packet(FXP_STATUS, :long, 12345, :long, 0)
+    end
+
+    Net::SSH::Test::Extensions::IO.with_test_extension do
+      sftp.connect!
+      sftp.loop { false }
+    end
+
+    assert sftp.open?, "session should still be usable after an unsolicited response"
+  end
+
+  def test_extensions_advertised_by_server_should_be_exposed
+    expect_sftp_session :server_version => 3,
+                        :extensions => ["posix-rename@openssh.com", "1"]
+
+    assert_scripted { sftp.connect! }
+    assert_equal({ "posix-rename@openssh.com" => "1" }, sftp.extensions)
+  end
+
 
   def test_v1_open_read_only_that_succeeds_should_invoke_callback
     expect_open("/path/to/file", "r", nil, :server_version => 1)

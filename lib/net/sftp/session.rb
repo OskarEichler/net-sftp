@@ -73,6 +73,10 @@ module Net; module SFTP
     # the server has not yet responded to will be represented here.
     attr_reader :pending_requests
 
+    # The hash of protocol extensions advertised by the server in its
+    # FXP_VERSION response, as name => data. Empty until the session is open.
+    attr_reader :extensions
+
     # Creates a new Net::SFTP instance atop the given Net::SSH connection.
     # This will return immediately, before the SFTP connection has been properly
     # initialized. Once the connection is ready, the given block will be called.
@@ -80,12 +84,20 @@ module Net; module SFTP
     #
     #   sftp = Net::SFTP::Session.new(ssh)
     #   sftp.loop { sftp.opening? }
-    def initialize(session, version = nil, &block)
-      @session    = session
-      @version    = version
-      @input      = Net::SSH::Buffer.new
-      self.logger = session.logger
-      @state      = :closed
+    #
+    # +version+ pins the protocol version offered to the server. +min_version+
+    # refuses the session outright if negotiation lands below it; the server
+    # alone decides the negotiated version, so without this a server can
+    # silently downgrade the client to protocol 1, where rename, readlink,
+    # symlink and link are all unavailable.
+    def initialize(session, version = nil, min_version: nil, &block)
+      @session     = session
+      @version     = version
+      @min_version = min_version
+      @input       = Net::SSH::Buffer.new
+      self.logger  = session.logger
+      @state       = :closed
+      @extensions  = {}
       @pending_requests = {}
 
       connect(&block)
@@ -932,6 +944,16 @@ module Net; module SFTP
       # version negotiation, instantiating the appropriate Protocol instance
       # and invoking the callback given to #connect, if any.
       def do_version(packet)
+        # Version negotiation happens exactly once, during the handshake. A
+        # second FXP_VERSION would otherwise swap the protocol driver
+        # mid-flight, discard every pending request (orphaning any caller
+        # blocked in Request#wait), and then fail on the already-cleared
+        # @on_ready list.
+        unless state == :init
+          raise Net::SFTP::Exception,
+                "server sent an unexpected FXP_VERSION packet while the session was #{state}"
+        end
+
         debug { "negotiating sftp protocol version, mine is #{HIGHEST_PROTOCOL_VERSION_SUPPORTED}" }
 
         server_version = packet.read_long
@@ -940,11 +962,16 @@ module Net; module SFTP
         negotiated_version = [server_version, HIGHEST_PROTOCOL_VERSION_SUPPORTED].min
         info { "negotiated version is #{negotiated_version}" }
 
-        extensions = {}
+        if @min_version && negotiated_version < @min_version
+          raise Net::SFTP::Exception,
+                "server negotiated sftp version #{negotiated_version}, but #{@min_version} was required"
+        end
+
+        @extensions = {}
         until packet.eof?
           name = packet.read_string
           data = packet.read_string
-          extensions[name] = data
+          @extensions[name] = data
         end
 
         @protocol = Protocol.load(self, negotiated_version)
@@ -957,9 +984,19 @@ module Net; module SFTP
 
       # Parses the packet, finds the associated Request instance, and tells
       # the Request instance to respond to the packet (see Request#respond_to).
+      #
+      # A response carrying an unknown request id is ignored rather than
+      # raised, so that an unsolicited or duplicated packet from the server
+      # cannot tear down the caller's event loop.
       def dispatch_request(packet)
         id = packet.read_long
-        request = pending_requests.delete(id) or raise Net::SFTP::Exception, "no such request `#{id}'"
+        request = pending_requests.delete(id)
+
+        if request.nil?
+          warn { "ignoring server response for unknown request `#{id}'" }
+          return
+        end
+
         request.respond_to(packet)
       end
   end

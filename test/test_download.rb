@@ -194,6 +194,35 @@ class DownloadTest < Net::SFTP::TestCase
     assert_equal "contents of file2", file2.string
   end
 
+  # Transfer callbacks run inside a Net::SSH channel callback and every one of
+  # them can raise StatusException. Without cleanup the exception unwinds
+  # through the event loop leaving the local file handle open.
+  def test_download_closes_local_file_when_a_transfer_callback_raises
+    local  = "/path/to/local"
+    remote = "/path/to/remote"
+
+    expect_sftp_session :server_version => 3 do |channel|
+      channel.sends_packet(FXP_OPEN, :long, 0, :string, remote, :long, 0x01, :long, 0)
+      channel.gets_packet(FXP_HANDLE, :long, 0, :string, "handle")
+      channel.sends_packet(FXP_READ, :long, 1, :string, "handle", :int64, 0, :long, 32_000)
+      # a read failure, rather than EOF
+      channel.gets_packet(FXP_STATUS, :long, 1, :long, 4)
+    end
+
+    file = StringIO.new
+    File.stubs(:open).with(local, SINK_FLAGS).returns(file)
+
+    Net::SSH::Test::Extensions::IO.with_test_extension do
+      sftp.connect!
+      assert_raises(Net::SFTP::StatusException) do
+        sftp.download(remote, local)
+        sftp.loop
+      end
+    end
+
+    assert file.closed?, "local file should have been closed when the transfer failed"
+  end
+
   def test_download_refuses_to_mkdir_through_a_local_symlink
     Dir.mktmpdir do |tmp|
       target = File.join(tmp, "target")
