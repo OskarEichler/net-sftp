@@ -136,6 +136,15 @@ module Net; module SFTP; module Operations
     # The properties hash for this object
     attr_reader :properties
 
+    # The flags used to open a local destination file. O_NOFOLLOW is included
+    # where the platform defines it, so that a symlink planted at the
+    # destination is reported rather than followed and overwritten.
+    SINK_OPEN_FLAGS = begin
+      flags = ::File::WRONLY | ::File::CREAT | ::File::TRUNC | ::File::BINARY
+      flags |= ::File::NOFOLLOW if defined?(::File::NOFOLLOW)
+      flags
+    end
+
     # Instantiates a new downloader process on top of the given SFTP session.
     # +local+ is either an IO object that should receive the data, or a string
     # identifying the target file or directory on the local host. +remote+ is
@@ -231,6 +240,48 @@ module Net; module SFTP; module Operations
         options[:requests] || (recursive? ? 16 : 2)
       end
 
+      # Ensures that a filename reported by the server during a recursive
+      # download is a plain, single path component, and raises
+      # Net::SFTP::Exception if it is not.
+      #
+      # Filenames in an FXP_NAME response are chosen entirely by the server. A
+      # name such as "../../.ssh/authorized_keys" would be joined onto the
+      # local destination and then resolved by the operating system, letting a
+      # malicious or compromised server write anywhere the client process can.
+      # Comparing against File.basename rejects "..", embedded separators and
+      # absolute paths in a single check, and is platform-correct (on Windows
+      # File.basename also understands "\\").
+      def validate_entry_name!(name)
+        if name.nil? || name.empty? || name != ::File.basename(name)
+          raise Net::SFTP::Exception, "remote server returned an unsafe file name #{name.inspect}"
+        end
+      end
+
+      # Creates the local directory for a recursive download, refusing to
+      # descend through a pre-existing symlink.
+      #
+      # ::File.directory? follows symlinks, so the original
+      # "mkdir unless directory?" check would silently accept a symlink
+      # planted at the destination and write every child file through it.
+      def make_directory(path)
+        if ::File.symlink?(path)
+          raise Net::SFTP::Exception, "refusing to download into symlink #{path.inspect}"
+        end
+
+        ::Dir.mkdir(path) unless ::File.directory?(path)
+      end
+
+      # Opens the local destination file for writing.
+      #
+      # Uses O_NOFOLLOW where the platform provides it so that an existing
+      # symlink at the destination is reported rather than followed (which
+      # would truncate and overwrite whatever it points at).
+      def open_sink(path)
+        ::File.open(path, SINK_OPEN_FLAGS)
+      rescue Errno::ELOOP, Errno::EMLINK
+        raise Net::SFTP::Exception, "refusing to write through symlink #{path.inspect}"
+      end
+
       # Enqueues as many files and directories from the stack as possible
       # (see #requests).
       def process_next_entry
@@ -240,7 +291,7 @@ module Net; module SFTP; module Operations
 
           if entry.directory
             update_progress(:mkdir, entry.local)
-            ::Dir.mkdir(entry.local) unless ::File.directory?(entry.local)
+            make_directory(entry.local)
             request = sftp.opendir(entry.remote, &method(:on_opendir))
             request[:entry] = entry
           else
@@ -275,6 +326,7 @@ module Net; module SFTP; module Operations
         else
           response[:names].each do |item|
             next if item.name == "." || item.name == ".."
+            validate_entry_name!(item.name)
             stack << Entry.new(::File.join(entry.remote, item.name), ::File.join(entry.local, item.name), item.directory?, item.attributes.size)
           end
 
@@ -308,7 +360,7 @@ module Net; module SFTP; module Operations
         raise StatusException.new(response, "open #{entry.remote}") unless response.ok?
 
         entry.handle = response[:handle]
-        entry.sink = entry.local.respond_to?(:write) ? entry.local : ::File.open(entry.local, "wb")
+        entry.sink = entry.local.respond_to?(:write) ? entry.local : open_sink(entry.local)
         entry.offset = 0
 
         download_next_chunk(entry)

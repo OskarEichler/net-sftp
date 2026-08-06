@@ -1,7 +1,11 @@
 require "common"
+require "tmpdir"
 
 class DownloadTest < Net::SFTP::TestCase
   FXP_DATA_CHUNK_SIZE = 1024
+
+  # The flags Download uses to open a local destination file.
+  SINK_FLAGS = Net::SFTP::Operations::Download::SINK_OPEN_FLAGS
 
   def setup
     prepare_progress!
@@ -15,7 +19,7 @@ class DownloadTest < Net::SFTP::TestCase
     expect_file_transfer(remote, text)
 
     file = StringIO.new
-    File.stubs(:open).with(local, "wb").returns(file)
+    File.stubs(:open).with(local, SINK_FLAGS).returns(file)
 
     assert_scripted_command { sftp.download(remote, local) }
     assert_equal text, file.string
@@ -29,7 +33,7 @@ class DownloadTest < Net::SFTP::TestCase
     expect_file_transfer(remote, text, :fragment_len => 1)
 
     file = StringIO.new
-    File.stubs(:open).with(local, "wb").returns(file)
+    File.stubs(:open).with(local, SINK_FLAGS).returns(file)
 
     assert_scripted_command { sftp.download(remote, local) }
     assert_equal text, file.string
@@ -144,6 +148,87 @@ class DownloadTest < Net::SFTP::TestCase
     end
   end
 
+  # A filename in an FXP_NAME response is chosen entirely by the server. Any
+  # name that is not a plain path component could escape the download target,
+  # so it must be rejected before it is joined onto the local path.
+  UNSAFE_REMOTE_NAMES = [
+    "..",                        # bare parent, the classic case
+    "../evil",                   # escapes one level
+    "../../.ssh/authorized_keys",# the realistic attack
+    "sub/../../evil",            # escapes via an innocent-looking prefix
+    "a/b",                       # embedded separator
+    "/etc/passwd",               # absolute path
+    ""                           # empty
+  ]
+
+  UNSAFE_REMOTE_NAMES.each do |name|
+    next if name == ".." # handled by the existing dot-entry skip; see below
+
+    define_method("test_download_rejects_unsafe_server_filename_#{name.inspect}") do
+      prepare_hostile_readdir("/path/to/local", "/path/to/remote", name)
+
+      error = nil
+      Net::SSH::Test::Extensions::IO.with_test_extension do
+        sftp.connect!
+        error = assert_raises(Net::SFTP::Exception) do
+          sftp.download("/path/to/remote", "/path/to/local", :recursive => true)
+          sftp.loop
+        end
+      end
+
+      assert_match(/unsafe file name/, error.message)
+      assert_match(/#{Regexp.escape(name.inspect)}/, error.message)
+    end
+  end
+
+  # "." and ".." are legitimate entries in any directory listing and must keep
+  # being skipped silently rather than raising.
+  def test_download_still_skips_dot_entries_without_raising
+    file1, file2 = prepare_directory_tree_download("/path/to/local", "/path/to/remote")
+
+    assert_scripted_command do
+      sftp.download("/path/to/remote", "/path/to/local", :recursive => true)
+    end
+
+    assert_equal "contents of file1", file1.string
+    assert_equal "contents of file2", file2.string
+  end
+
+  def test_download_refuses_to_mkdir_through_a_local_symlink
+    Dir.mktmpdir do |tmp|
+      target = File.join(tmp, "target")
+      link   = File.join(tmp, "link")
+      Dir.mkdir(target)
+      File.symlink(target, link)
+
+      downloader = Net::SFTP::Operations::Download.allocate
+      error = assert_raises(Net::SFTP::Exception) do
+        downloader.send(:make_directory, link)
+      end
+      assert_match(/refusing to download into symlink/, error.message)
+    end
+  end
+
+  def test_download_refuses_to_write_through_a_local_symlink
+    skip "platform has no O_NOFOLLOW" unless defined?(File::NOFOLLOW)
+
+    Dir.mktmpdir do |tmp|
+      target = File.join(tmp, "target")
+      link   = File.join(tmp, "link")
+      File.write(target, "original contents")
+      File.symlink(target, link)
+
+      downloader = Net::SFTP::Operations::Download.allocate
+      error = assert_raises(Net::SFTP::Exception) do
+        downloader.send(:open_sink, link)
+      end
+      assert_match(/refusing to write through symlink/, error.message)
+
+      # the symlink target must be untouched
+      assert_equal "original contents", File.read(target)
+    end
+  end
+
   private
 
     def expect_file_transfer(remote, text, opts={})
@@ -178,7 +263,7 @@ class DownloadTest < Net::SFTP::TestCase
       end
 
       file = StringIO.new
-      File.stubs(:open).with(local, "wb").returns(file)
+      File.stubs(:open).with(local, SINK_FLAGS).returns(file)
 
       return file
     end
@@ -281,9 +366,27 @@ class DownloadTest < Net::SFTP::TestCase
 
       file1 = StringIO.new
       file2 = StringIO.new
-      File.expects(:open).with(File.join(local, "file1"), "wb").returns(file1)
-      File.expects(:open).with(File.join(local, "subdir1", "file2"), "wb").returns(file2)
+      File.expects(:open).with(File.join(local, "file1"), SINK_FLAGS).returns(file1)
+      File.expects(:open).with(File.join(local, "subdir1", "file2"), SINK_FLAGS).returns(file2)
 
       [file1, file2]
+    end
+
+    # Scripts a recursive download whose first FXP_READDIR response contains a
+    # single entry named +name+, chosen by the (hostile) server.
+    def prepare_hostile_readdir(local, remote, name)
+      expect_sftp_session :server_version => 3 do |channel|
+        channel.sends_packet(FXP_OPENDIR, :long, 0, :string, remote)
+        channel.gets_packet(FXP_HANDLE, :long, 0, :string, "dir1")
+
+        channel.sends_packet(FXP_READDIR, :long, 1, :string, "dir1")
+        channel.gets_packet(FXP_NAME, :long, 1, :long, 1,
+          :string, name, :string, "-rw-rw-r--  1 bob bob  100 Aug  1 #{name}",
+          :long, 0x04, :long, 0100644)
+      end
+
+      File.stubs(:symlink?).with(local).returns(false)
+      File.stubs(:directory?).with(local).returns(false)
+      Dir.stubs(:mkdir).with(local)
     end
 end
