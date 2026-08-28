@@ -156,10 +156,12 @@ module Net; module SFTP; module Operations
     # Writes each argument to the stream, appending a newline to any item
     # that does not already end in a newline. Array arguments are flattened.
     def puts(*items)
+      items = [""] if items.empty?
       items.each do |item|
         if Array === item
-          puts(*item)
+          puts(*item) unless item.empty?
         else
+          item = item.to_s
           write(item)
           write("\n") unless item[-1] == ?\n
         end
