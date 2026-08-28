@@ -132,8 +132,8 @@ module Net; module SFTP; module Operations
     def write(data)
       data = data.to_s
       sftp.write!(handle, @pos, data)
-      self.pos = @pos + data.bytes.length unless data.empty?
-      data.bytes.length
+      self.pos = @pos + data.bytesize unless data.empty?
+      data.bytesize
     end
 
     # Writes each argument to the stream. If +$\+ is set, it will be written

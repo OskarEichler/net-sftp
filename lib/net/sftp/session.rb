@@ -790,8 +790,6 @@ module Net; module SFTP
         self
       end
 
-      alias :loop_forever :loop
-
       # Runs the SSH event loop while the given block returns true. This lets
       # you set up a state machine and then "fire it off". If you do not specify
       # a block, the event loop will run for as long as there are any pending
@@ -803,6 +801,8 @@ module Net; module SFTP
         block ||= Proc.new { pending_requests.any? }
         session.loop(&block)
       end
+
+      alias :loop_forever :loop
 
       # Formats, constructs, and sends an SFTP packet of the given type and with
       # the given data. This does not block, but merely enqueues the packet for
@@ -924,7 +924,7 @@ module Net; module SFTP
         server_version = packet.read_long
         debug { "server reports sftp version #{server_version}" }
 
-        negotiated_version = [server_version, HIGHEST_PROTOCOL_VERSION_SUPPORTED].min
+        negotiated_version = [server_version, @version || HIGHEST_PROTOCOL_VERSION_SUPPORTED, HIGHEST_PROTOCOL_VERSION_SUPPORTED].min
         info { "negotiated version is #{negotiated_version}" }
 
         extensions = {}
