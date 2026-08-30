@@ -261,6 +261,15 @@ class FileOperationsTest < Net::SFTP::TestCase
     @file.puts(item)
   end
 
+  def test_puts_should_terminate_recursive_array_conversion
+    item = Object.new
+    item.define_singleton_method(:to_ary) { [self] }
+    @sftp.expects(:write!).with("handle", 0, "[...]")
+    @sftp.expects(:write!).with("handle", 5, "\n")
+
+    @file.puts(item)
+  end
+
   def test_stat_should_return_attributes_object_for_handle
     stat = stub("stat")
     @sftp.expects(:fstat!).with("handle").returns(stat)

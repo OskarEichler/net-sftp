@@ -191,12 +191,12 @@ module Net; module SFTP; module Operations
       def write_puts_item(item, recursion)
         array = Array.try_convert(item)
         if array
-          if recursion.key?(array)
+          if recursion.key?(item)
             item = "[...]"
           else
-            recursion[array] = true
+            recursion[item] = true
             array.each { |child| write_puts_item(child, recursion) }
-            recursion.delete(array)
+            recursion.delete(item)
             return
           end
         end
