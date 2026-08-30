@@ -151,9 +151,10 @@ class UploadTest < Net::SFTP::TestCase
       channel.gets_packet(FXP_STATUS, :long, 2, :long, 0)
     end
 
-    assert_scripted_command do
-      sftp.upload(StringIO.new("this is some text"), "/path/to/remote")
-    end
+    source = StringIO.new("this is some text")
+    assert_scripted_command { sftp.upload(source, "/path/to/remote") }
+
+    assert !source.closed?
   end
 
   def test_upload_should_reject_nonpositive_requests_and_read_size
