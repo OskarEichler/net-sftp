@@ -158,15 +158,8 @@ module Net; module SFTP; module Operations
     # that does not already end in a newline. Array arguments are flattened.
     def puts(*items)
       items = [""] if items.empty?
-      items.each do |item|
-        if Array === item
-          puts(*item) unless item.empty?
-        else
-          item = item.to_s
-          write(item)
-          write("\n") unless item[-1] == ?\n
-        end
-      end
+      recursion = {}.compare_by_identity
+      items.each { |item| write_puts_item(item, recursion) }
       nil
     end
 
@@ -179,6 +172,24 @@ module Net; module SFTP; module Operations
     end
 
     private
+
+      def write_puts_item(item, recursion)
+        array = Array.try_convert(item)
+        if array
+          if recursion.key?(item)
+            item = "[...]"
+          else
+            recursion[item] = true
+            array.each { |child| write_puts_item(child, recursion) }
+            recursion.delete(item)
+            return
+          end
+        end
+
+        item = item.to_s
+        write(item)
+        write("\n") unless item[-1] == ?\n
+      end
 
       # Fills the buffer. Returns +true+ if it succeeded, and +false+ if
       # EOF was encountered before any data was read.
