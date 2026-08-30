@@ -227,7 +227,7 @@ module Net; module SFTP; module Operations
 
       # A simple struct for recording metadata about the file currently being
       # uploaded.
-      LiveFile = Struct.new(:local, :remote, :io, :size, :handle, :owned)
+      LiveFile = Struct.new(:local, :remote, :io, :size, :handle, :owned, :offset)
 
       # The default # of bytes to read from disk at a time.
       DEFAULT_READ_SIZE   = 32_000
@@ -292,11 +292,11 @@ module Net; module SFTP; module Operations
 
         if file.respond_to?(:stat)
           size = file.stat.size
-        else
+        elsif file.respond_to?(:size)
           size = file.size
         end
 
-        metafile = LiveFile.new(name, remote, file, size, nil, owned)
+        metafile = LiveFile.new(name, remote, file, size, nil, owned, 0)
         update_progress(:open, metafile)
 
         request = sftp.open(remote, "w", &method(:on_open))
@@ -359,7 +359,7 @@ module Net; module SFTP; module Operations
           process_next_entry
         else
           @active += 1
-          offset = file.io.pos
+          offset = file.offset
           data = file.io.read(options[:read_size] || DEFAULT_READ_SIZE)
           if data.nil?
             update_progress(:close, file)
@@ -369,6 +369,7 @@ module Net; module SFTP; module Operations
             file.io = nil
             @uploads.delete(file)
           else
+            file.offset += data.bytesize
             update_progress(:put, file, offset, data)
             request = sftp.write(file.handle, offset, data, &method(:on_write))
             request[:file] = file
