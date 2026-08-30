@@ -144,6 +144,17 @@ class DownloadTest < Net::SFTP::TestCase
     end
   end
 
+  def test_download_should_reject_nonpositive_requests_and_read_size
+    session = stub("sftp", :logger => nil)
+
+    assert_raises(ArgumentError) do
+      Net::SFTP::Operations::Download.new(session, StringIO.new, "/path/to/remote", :requests => 0)
+    end
+    assert_raises(ArgumentError) do
+      Net::SFTP::Operations::Download.new(session, StringIO.new, "/path/to/remote", :read_size => -1)
+    end
+  end
+
   private
 
     def expect_file_transfer(remote, text, opts={})
