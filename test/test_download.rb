@@ -141,6 +141,7 @@ class DownloadTest < Net::SFTP::TestCase
 
     assert_scripted_command { sftp.download(remote, local) }
     assert_equal text, local.string
+    refute local.closed?
   end
 
   def test_download_directory_to_buffer_should_fail

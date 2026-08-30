@@ -440,8 +440,9 @@ module Net; module SFTP; module Operations
 
         if response.eof?
           update_progress(:close, entry)
-          entry.sink.close
-          @open_sinks.delete(entry.sink)
+          if @open_sinks.delete(entry.sink)
+            entry.sink.close
+          end
           request = sftp.close(entry.handle, &callback(:on_close))
           request[:entry] = entry
         elsif !response.ok?
