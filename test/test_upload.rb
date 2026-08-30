@@ -168,6 +168,15 @@ class UploadTest < Net::SFTP::TestCase
     end
   end
 
+  def test_upload_should_accept_a_read_only_stream
+    expect_file_transfer_from_stream("/path/to/remote", "this is some text")
+    chunks = ["this is some text", nil]
+    source = Object.new
+    source.define_singleton_method(:read) { |_size| chunks.shift }
+
+    assert_scripted_command { sftp.upload(source, "/path/to/remote") }
+  end
+
   private
 
     def prepare_directory
@@ -241,5 +250,16 @@ class UploadTest < Net::SFTP::TestCase
       end
 
       expect_file(local, data)
+    end
+
+    def expect_file_transfer_from_stream(remote, data)
+      expect_sftp_session :server_version => 3 do |channel|
+        channel.sends_packet(FXP_OPEN, :long, 0, :string, remote, :long, 0x1A, :long, 0)
+        channel.gets_packet(FXP_HANDLE, :long, 0, :string, "handle")
+        channel.sends_packet(FXP_WRITE, :long, 1, :string, "handle", :int64, 0, :string, data)
+        channel.sends_packet(FXP_CLOSE, :long, 2, :string, "handle")
+        channel.gets_packet(FXP_STATUS, :long, 1, :long, 0)
+        channel.gets_packet(FXP_STATUS, :long, 2, :long, 0)
+      end
     end
 end
