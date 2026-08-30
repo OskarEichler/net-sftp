@@ -333,7 +333,7 @@ module Net; module SFTP; module Operations
       def on_read(response)
         entry = response.request[:entry]
 
-        if response.eof?
+        if response.eof? || (response.ok? && response[:data].empty?)
           update_progress(:close, entry)
           entry.sink.close if entry.owned
           request = sftp.close(entry.handle, &method(:on_close))
