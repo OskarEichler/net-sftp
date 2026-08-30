@@ -50,4 +50,13 @@ class Protocol::V04::TestName < Net::SFTP::TestCase
     assert_equal "-rwxr-xr-x jamis    users       10240 Mar 12 03:40 test",
       @file.longname
   end
+
+  def test_longname_should_tolerate_omitted_optional_attributes
+    sparse = Net::SFTP::Protocol::V04::Name.new(
+      "test",
+      Net::SFTP::Protocol::V04::Attributes.new(:type => 1)
+    )
+
+    assert_equal "----------                          -              test", sparse.longname
+  end
 end
