@@ -1,4 +1,5 @@
 require 'net/ssh/loggable'
+require 'pathname'
 
 module Net; module SFTP; module Operations
 
