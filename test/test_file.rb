@@ -59,7 +59,8 @@ class FileOperationsTest < Net::SFTP::TestCase
   end
 
   def test_read_with_positive_length_at_eof_should_return_nil
-    @sftp.expects(:read!).returns(nil)
+    @sftp.expects(:read!).once.returns(nil)
+    assert_nil @file.read(1)
     assert_nil @file.read(1)
     assert_equal 0, @file.pos
   end
