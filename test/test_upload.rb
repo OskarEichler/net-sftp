@@ -166,6 +166,19 @@ class UploadTest < Net::SFTP::TestCase
     assert_scripted_command { sftp.upload(source, "/path/to/remote") }
   end
 
+  def test_upload_should_treat_an_empty_chunk_as_end_of_file
+    expect_sftp_session :server_version => 3 do |channel|
+      channel.sends_packet(FXP_OPEN, :long, 0, :string, "/path/to/remote", :long, 0x1A, :long, 0)
+      channel.gets_packet(FXP_HANDLE, :long, 0, :string, "handle")
+      channel.sends_packet(FXP_CLOSE, :long, 1, :string, "handle")
+      channel.gets_packet(FXP_STATUS, :long, 1, :long, 0)
+    end
+    source = Object.new
+    source.define_singleton_method(:read) { |_size| "" }
+
+    assert_scripted_command { sftp.upload(source, "/path/to/remote") }
+  end
+
   private
 
     def prepare_directory

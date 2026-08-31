@@ -361,7 +361,7 @@ module Net; module SFTP; module Operations
           @active += 1
           offset = file.offset
           data = file.io.read(options[:read_size] || DEFAULT_READ_SIZE)
-          if data.nil?
+          if data.nil? || data.empty?
             update_progress(:close, file)
             request = sftp.close(file.handle, &method(:on_close))
             request[:file] = file
